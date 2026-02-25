@@ -1,4 +1,4 @@
-local version = "15.02.2026"
+local version = "25.02.2026"
 script_author("melvin-costra")
 script_name("Kitchen helper")
 script_version(version)
@@ -12,20 +12,29 @@ local encoding = require 'encoding'
 encoding.default = 'CP1251'
 u8 = encoding.UTF8
 
+local rkeys = require "rkeys"
+imgui.HotKey = require('imgui_addons').HotKey
+
 ------------------------------------ Vars  ------------------------------------
 local CONFIG_PATH = "moonloader/config/kitchen.json"
 local window = imgui.ImBool(false)
-local antiflood = os.clock() * 1000
+local currentPage = 1
+local currentDishName = ""
+local pages = { "Авто-готовка", "Авто-еда" }
+local antiflood = os.clock()
 local commandStates = {}
-local isCooking, isUpdatingData = false, false
+local isSendSatietyCommand = false
+local isStartEating = false
+local isCooking, isUpdatingData, isEating, isHealing = false, false, false, false
 local dishesQueue = {}
+local tLastKeys = {}
 local data = {
-  skill = 0,
+  skill = -1,
   ingredients = {
     inventory = {
       ["Грибы"] = 0,
       ["Сырая рыба"] = 0,
-      ["Готовая рыба"] = 0,
+      ["Жареная рыба"] = 0,
       ["Мясо дикой коровы"] = 0,
       ["Мясо оленя"] = 0,
       ["Мясо черепахи"] = 0,
@@ -60,169 +69,250 @@ local data = {
       ["Мелкая камбала"] = 0,
       ["Рыба-еж"] = 0,
     }
-  }
+  },
+  my_satiety = -1,
+  my_hp = -1
 }
 
 ------------------------------------ Settings  ------------------------------------
 local cfg = {
   dishes = {
     ["Готовые грибы"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 0,
       key = "inventory",
       ingredients = {
         ["Грибы"] = 1,
-      }
+      },
+      is_eating = false,
+      hp = 0,
+      satiety = 10,
+      max_satiety = 50,
     },
     ["Жареная рыба"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 0,
       key = "inventory",
       ingredients = {
         ["Сырая рыба"] = 20000,
-      }
+      },
+      is_eating = false,
+      hp = 0,
+      satiety = 35,
+      max_satiety = 75,
     },
     ["Жареная говядина"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 0,
       key = "inventory",
       ingredients = {
         ["Мясо дикой коровы"] = 1,
-      }
+      },
+      is_eating = false,
+      hp = 0,
+      satiety = 35,
+      max_satiety = 75,
     },
     ["Жареное мясо оленя"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 0,
       key = "inventory",
       ingredients = {
         ["Мясо оленя"] = 1,
-      }
+      },
+      is_eating = false,
+      hp = 0,
+      satiety = 35,
+      max_satiety = 75,
     },
     ["Тушеное черепашье мясо"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 0,
       key = "inventory",
       ingredients = {
         ["Мясо черепахи"] = 1,
-      }
+      },
+      is_eating = false,
+      hp = 0,
+      satiety = 35,
+      max_satiety = 75,
     },
     ["Жареное акулье мясо"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 0,
       key = "inventory",
       ingredients = {
         ["Мясо акулы"] = 1,
-      }
+      },
+      is_eating = false,
+      hp = 0,
+      satiety = 35,
+      max_satiety = 75,
     },
     ["Рагу из черепашьего мяса"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 500,
       key = "inventory",
       ingredients = {
         ["Тушеное черепашье мясо"] = 1,
-      }
+      },
+      is_eating = false,
+      hp = 5,
+      satiety = 65,
+      max_satiety = 150,
     },
     ["Говядина с грибами"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 1000,
       key = "inventory",
       ingredients = {
         ["Жареная говядина"] = 1,
         ["Готовые грибы"] = 25,
-      }
+      },
+      is_eating = false,
+      hp = 10,
+      satiety = 75,
+      max_satiety = 150,
     },
     ["Оленина с грибами"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 1000,
       key = "inventory",
       ingredients = {
         ["Жареное мясо оленя"] = 1,
         ["Готовые грибы"] = 25,
-      }
+      },
+      is_eating = false,
+      hp = 10,
+      satiety = 75,
+      max_satiety = 150,
     },
     ["Уха с мясом акулы"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 1500,
       key = "inventory",
       ingredients = {
         ["Жареное акулье мясо"] = 1,
-      }
+      },
+      is_eating = false,
+      hp = 15,
+      satiety = 85,
+      max_satiety = 150,
     },
     ["Морское блюдо"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 2500,
       key = "fish",
       ingredients = {
         ["Сардина"] = 5,
-      }
+      },
+      is_eating = false,
+      hp = 25,
+      satiety = 25,
+      max_satiety = 150,
     },
     ["Уха из форели"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 3000,
       key = "fish",
       ingredients = {
         ["Радужная форель"] = 3,
-      }
+      },
+      is_eating = false,
+      hp = 30,
+      satiety = 30,
+      max_satiety = 150,
     },
     ["Уха из щуки"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 3500,
       key = "fish",
       ingredients = {
         ["Щука"] = 3,
-      }
+      },
+      is_eating = false,
+      hp = 35,
+      satiety = 35,
+      max_satiety = 150,
     },
     ["Рыбная похлебка"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 4000,
       key = "fish",
       ingredients = {
         ["Лосось"] = 3,
-      }
+      },
+      is_eating = false,
+      hp = 40,
+      satiety = 40,
+      max_satiety = 150,
     },
     ["Запечённый карп"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 5000,
       key = "fish",
       ingredients = {
         ["Карп"] = 4,
-      }
+      },
+      is_eating = false,
+      hp = 50,
+      satiety = 50,
+      max_satiety = 150,
     },
     ["Жареный кальмар"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 6500,
       key = "fish",
       ingredients = {
         ["Кальмар"] = 2,
-      }
+      },
+      is_eating = false,
+      hp = 65,
+      satiety = 65,
+      max_satiety = 150,
     },
     ["Рыбные тако"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 6500,
       key = "fish",
       ingredients = {
         ["Тунец"] = 3,
-      }
+      },
+      is_eating = false,
+      hp = 65,
+      satiety = 65,
+      max_satiety = 150,
     },
     ["Морской пенный пудинг"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 8000,
       key = "fish",
       ingredients = {
         ["Мелкая камбала"] = 4,
-      }
+      },
+      is_eating = false,
+      hp = 80,
+      satiety = 80,
+      max_satiety = 150,
     },
     ["Жареная рыба-еж"] = {
-      enabled = false,
+      is_cooking = false,
       skill = 10000,
       key = "fish",
       ingredients = {
         ["Рыба-еж"] = 1,
-      }
+      },
+      is_eating = false,
+      hp = 100,
+      satiety = 100,
+      max_satiety = 150,
     },
   },
   settings = {
-    enabled = false,
+    cook_enabled = false,
+    eat_enabled = false,
+    act_eat_key = { v = { 18, 49 } },
+    act_heal_key = { v = { 18, 51 } },
   },
   version = version
 }
@@ -255,6 +345,8 @@ function main()
       local fileCFG = decodeJson(file:read('*a'))
       if checkSavedCFG(fileCFG) then
         cfg = fileCFG
+      else
+        saveCFG()
       end
     end
   end
@@ -268,28 +360,48 @@ function main()
   end)
   sampRegisterChatCommand("kc", startCooking)
 
+  bindEat = rkeys.registerHotKey(cfg.settings.act_eat_key.v, true, startEating)
+  bindHeal = rkeys.registerHotKey(cfg.settings.act_heal_key.v, true, startHealing)
+
+  lua_thread.create(trackSatiety)
+
   while true do
     wait(0)
     imgui.Process = window.v
+    if isSendSatietyCommand then
+      sendCommand("/satiety")
+      isSendSatietyCommand = false
+    end
+    if isStartEating then
+      startEating()
+      isStartEating = false
+    end
     if isCooking and isKeyJustPressed(VK_R) and not sampIsCursorActive() then stopCooking() end
+    if isEating and isKeyJustPressed(VK_R) and not sampIsCursorActive() then
+      stopEating()
+      cfg.settings.eat_enabled = false
+      saveCFG()
+      sendChatMessage("Авто-поедание отключено")
+    end
   end
 end
 
+-- Cooking
 function startCooking()
-  if not cfg.settings.enabled then return end
+  if not cfg.settings.cook_enabled then return end
   if isCooking then
     stopCooking()
     return
   end
   for _, v in pairs(cfg.dishes) do
-    if v.enabled then
+    if v.is_cooking then
       isCooking = true
       sendCommand("/kitchen cooking")
       sendChatMessage("Готовка включена. Жми {6AB1FF}R{FFFFFF} для остановки")
       return
     end
   end
-  sendChatMessage("Сначала выбери хотя бы одно блюдо в меню (/kh)")
+  sendChatMessage("Сначала выбери хотя бы одно блюдо в меню авто-готовки (/kh)")
 end
 
 function stopCooking()
@@ -302,7 +414,7 @@ function stopCooking()
 end
 
 function selectAvailableDishes()
-  for k, v in pairs(cfg.dishes) do
+  for _, v in pairs(cfg.dishes) do
     local hasAllIngredients = true
     for ing, count in pairs(v.ingredients) do
       if data.ingredients[v.key][ing] < count then 
@@ -311,9 +423,119 @@ function selectAvailableDishes()
       end
     end
     if hasAllIngredients and data.skill >= v.skill then
-      v.enabled = true
+      v.is_cooking = true
     else
-      v.enabled = false
+      v.is_cooking = false
+    end
+  end
+end
+
+-- Eating & Healing
+function startEating()
+  if not cfg.settings.eat_enabled or isHealing or sampIsCursorActive() then return end
+  if isEating then
+    stopEating()
+    return
+  end
+  for _, v in pairs(cfg.dishes) do
+    if v.is_eating then
+      isEating = true
+      sendCommand("/satiety")
+      sendChatMessage("Кушаем. Жми {6AB1FF}R{FFFFFF} для остановки")
+      return
+    end
+  end
+  sendChatMessage("Сначала выбери хотя бы одно блюдо в меню авто-еды (/kh)")
+end
+
+function stopEating()
+  isEating = false
+  isHealing = false
+  commandStates = {}
+  currentDishName = ""
+end
+
+function startHealing()
+  if not cfg.settings.eat_enabled or isEating or sampIsCursorActive() then return end
+  if isHealing then
+    stopHealing()
+    return
+  end
+  data.my_hp = getCharHealth(PLAYER_PED)
+  if data.my_hp >= 100 then
+    sendChatMessage("У тебя максимальное HP")
+    stopEating()
+    return
+  end
+  for _, v in pairs(cfg.dishes) do
+    if v.is_eating and v.hp > 0 then
+      isHealing = true
+      sendCommand("/eat")
+      sendChatMessage("Лечимся. Жми {6AB1FF}R{FFFFFF} для остановки")
+      return
+    end
+  end
+  sendChatMessage("Сначала выбери хотя бы одно блюдо в меню которое пополняет HP (/kh)")
+end
+
+function selectExistingDishes()
+  for k, v in pairs(cfg.dishes) do
+    if data.ingredients.inventory[k] > 0 then
+      v.is_eating = true
+    else
+      v.is_eating = false
+    end
+  end
+end
+
+function trackSatiety()
+  local satietyInterval = 35
+  local checkInterval = 300
+
+  local lastTime = os.clock()
+  local satietyAccum = 0
+  local checkAccum = 0
+
+  while true do
+    wait(0)
+
+    local currentTime = os.clock()
+    local delta = currentTime - lastTime
+    lastTime = currentTime
+
+    if cfg.settings.eat_enabled and sampIsLocalPlayerSpawned() and not isEating and not isUpdatingData then
+      satietyAccum = satietyAccum + delta
+      checkAccum = checkAccum + delta
+
+      if data.my_satiety > 0 and satietyAccum >= satietyInterval then
+        local toRemove = math.floor(satietyAccum / satietyInterval)
+        satietyAccum = satietyAccum % satietyInterval
+        data.my_satiety = math.max(0, data.my_satiety - toRemove)
+      end
+
+      if data.my_satiety == 0 then
+        isStartEating = true
+      end
+
+      if checkAccum >= checkInterval then
+        local times = math.floor(checkAccum / checkInterval)
+        checkAccum = checkAccum % checkInterval
+        if times > 0 then
+          isSendSatietyCommand = true
+        end
+      end
+
+      if data.my_satiety == -1 then
+        satietyAccum = 0
+        if checkAccum >= 30 then
+          isSendSatietyCommand = true
+          checkAccum = 0
+        end
+      end
+    else
+      satietyAccum = 0
+      checkAccum = 0
+      lastTime = os.clock()
     end
   end
 end
@@ -323,27 +545,47 @@ function imgui.OnDrawFrame()
   local sw, sh = getScreenResolution()
   local window_width = 280
   local window_height = 440
-  local options = {
-    enabled = imgui.ImBool(cfg.settings.enabled),
-    cooked_mushrooms = imgui.ImBool(cfg.dishes["Готовые грибы"].enabled),
-    fried_fish = imgui.ImBool(cfg.dishes["Жареная рыба"].enabled),
-    fried_beef = imgui.ImBool(cfg.dishes["Жареная говядина"].enabled),
-    fried_venison = imgui.ImBool(cfg.dishes["Жареное мясо оленя"].enabled),
-    stewed_turtle_meat = imgui.ImBool(cfg.dishes["Тушеное черепашье мясо"].enabled),
-    fried_shark_meat = imgui.ImBool(cfg.dishes["Жареное акулье мясо"].enabled),
-    stewed_turtle_meat_with_mushrooms = imgui.ImBool(cfg.dishes["Рагу из черепашьего мяса"].enabled),
-    beef_with_mushrooms = imgui.ImBool(cfg.dishes["Говядина с грибами"].enabled),
-    venison_with_mushrooms = imgui.ImBool(cfg.dishes["Оленина с грибами"].enabled),
-    shark_meat_soup = imgui.ImBool(cfg.dishes["Уха с мясом акулы"].enabled),
-    seafood_dish = imgui.ImBool(cfg.dishes["Морское блюдо"].enabled),
-    trout_fish_soup = imgui.ImBool(cfg.dishes["Уха из форели"].enabled),
-    pike_fish_soup = imgui.ImBool(cfg.dishes["Уха из щуки"].enabled),
-    fish_chowder = imgui.ImBool(cfg.dishes["Рыбная похлебка"].enabled),
-    baked_carp = imgui.ImBool(cfg.dishes["Запечённый карп"].enabled),
-    fried_squid = imgui.ImBool(cfg.dishes["Жареный кальмар"].enabled),
-    fish_tacos = imgui.ImBool(cfg.dishes["Рыбные тако"].enabled),
-    sea_foam_pudding = imgui.ImBool(cfg.dishes["Морской пенный пудинг"].enabled),
-    fried_porcupinefish = imgui.ImBool(cfg.dishes["Жареная рыба-еж"].enabled),
+  local cook_options = {
+    cooked_mushrooms = imgui.ImBool(cfg.dishes["Готовые грибы"].is_cooking),
+    fried_fish = imgui.ImBool(cfg.dishes["Жареная рыба"].is_cooking),
+    fried_beef = imgui.ImBool(cfg.dishes["Жареная говядина"].is_cooking),
+    fried_venison = imgui.ImBool(cfg.dishes["Жареное мясо оленя"].is_cooking),
+    stewed_turtle_meat = imgui.ImBool(cfg.dishes["Тушеное черепашье мясо"].is_cooking),
+    fried_shark_meat = imgui.ImBool(cfg.dishes["Жареное акулье мясо"].is_cooking),
+    stewed_turtle_meat_with_mushrooms = imgui.ImBool(cfg.dishes["Рагу из черепашьего мяса"].is_cooking),
+    beef_with_mushrooms = imgui.ImBool(cfg.dishes["Говядина с грибами"].is_cooking),
+    venison_with_mushrooms = imgui.ImBool(cfg.dishes["Оленина с грибами"].is_cooking),
+    shark_meat_soup = imgui.ImBool(cfg.dishes["Уха с мясом акулы"].is_cooking),
+    seafood_dish = imgui.ImBool(cfg.dishes["Морское блюдо"].is_cooking),
+    trout_fish_soup = imgui.ImBool(cfg.dishes["Уха из форели"].is_cooking),
+    pike_fish_soup = imgui.ImBool(cfg.dishes["Уха из щуки"].is_cooking),
+    fish_chowder = imgui.ImBool(cfg.dishes["Рыбная похлебка"].is_cooking),
+    baked_carp = imgui.ImBool(cfg.dishes["Запечённый карп"].is_cooking),
+    fried_squid = imgui.ImBool(cfg.dishes["Жареный кальмар"].is_cooking),
+    fish_tacos = imgui.ImBool(cfg.dishes["Рыбные тако"].is_cooking),
+    sea_foam_pudding = imgui.ImBool(cfg.dishes["Морской пенный пудинг"].is_cooking),
+    fried_porcupinefish = imgui.ImBool(cfg.dishes["Жареная рыба-еж"].is_cooking),
+  }
+  local eat_options = {
+    cooked_mushrooms = imgui.ImBool(cfg.dishes["Готовые грибы"].is_eating),
+    fried_fish = imgui.ImBool(cfg.dishes["Жареная рыба"].is_eating),
+    fried_beef = imgui.ImBool(cfg.dishes["Жареная говядина"].is_eating),
+    fried_venison = imgui.ImBool(cfg.dishes["Жареное мясо оленя"].is_eating),
+    stewed_turtle_meat = imgui.ImBool(cfg.dishes["Тушеное черепашье мясо"].is_eating),
+    fried_shark_meat = imgui.ImBool(cfg.dishes["Жареное акулье мясо"].is_eating),
+    stewed_turtle_meat_with_mushrooms = imgui.ImBool(cfg.dishes["Рагу из черепашьего мяса"].is_eating),
+    beef_with_mushrooms = imgui.ImBool(cfg.dishes["Говядина с грибами"].is_eating),
+    venison_with_mushrooms = imgui.ImBool(cfg.dishes["Оленина с грибами"].is_eating),
+    shark_meat_soup = imgui.ImBool(cfg.dishes["Уха с мясом акулы"].is_eating),
+    seafood_dish = imgui.ImBool(cfg.dishes["Морское блюдо"].is_eating),
+    trout_fish_soup = imgui.ImBool(cfg.dishes["Уха из форели"].is_eating),
+    pike_fish_soup = imgui.ImBool(cfg.dishes["Уха из щуки"].is_eating),
+    fish_chowder = imgui.ImBool(cfg.dishes["Рыбная похлебка"].is_eating),
+    baked_carp = imgui.ImBool(cfg.dishes["Запечённый карп"].is_eating),
+    fried_squid = imgui.ImBool(cfg.dishes["Жареный кальмар"].is_eating),
+    fish_tacos = imgui.ImBool(cfg.dishes["Рыбные тако"].is_eating),
+    sea_foam_pudding = imgui.ImBool(cfg.dishes["Морской пенный пудинг"].is_eating),
+    fried_porcupinefish = imgui.ImBool(cfg.dishes["Жареная рыба-еж"].is_eating),
   }
 
   imgui.SetNextWindowPos(imgui.ImVec2(sw / 2, sh / 2), imgui.Cond.FirstUseEver, imgui.ImVec2(0.5, 0.5))
@@ -351,273 +593,481 @@ function imgui.OnDrawFrame()
 
   imgui.Begin("Kitchen helper by melvin-costra", window, imgui.WindowFlags.NoResize + imgui.WindowFlags.NoCollapse)
 
-  if imgui.Button(u8("Вкл/Выкл")) then toggleScriptActivation() end
-  imgui.SameLine(150)
-  imgui.TextColoredRGB("Статус: " .. (cfg.settings.enabled and "{00B200}Включен" or "{FF0F00}Выключен"))
-  imgui.TextColoredRGB("Твой скилл: {6AB1FF}" .. data.skill)
-  imgui.TextColoredRGB("{9c9c9c}/kc {ffffff}- начать готовку")
-
+  for i, p in ipairs(pages) do
+    if imgui.ButtonClickable(i ~= currentPage, u8(p)) then
+        currentPage = i
+    end
+    imgui.SameLine()
+  end
   imgui.NewLine()
+  imgui.Separator()
 
-  if imgui.ButtonClickable(not isUpdatingData, u8("Выбрать доступные блюда")) then
-    selectAvailableDishes()
-    saveCFG()
+  if currentPage == 1 then
+    if imgui.Button(u8("Вкл/Выкл")) then
+      cfg.settings.cook_enabled = not cfg.settings.cook_enabled
+      if isCooking then stopCooking() end
+      saveCFG()
+    end
+    imgui.SameLine(130)
+    imgui.TextColoredRGB("Статус: " .. (cfg.settings.cook_enabled and "{00B200}Включено" or "{FF0F00}Выключено"))
+    imgui.TextColoredRGB("Твой скилл: {6AB1FF}" .. data.skill)
+    imgui.TextColoredRGB("{9c9c9c}/kc {ffffff}- начать готовку")
+  
+    imgui.NewLine()
+  
+    if imgui.ButtonClickable(not isUpdatingData, u8("Выбрать доступные блюда")) then
+      selectAvailableDishes()
+      saveCFG()
+    end
+  
+    imgui.NewLine()
+  
+    imgui.TextColoredRGB("Скилл: {6AB1FF}0")
+    imgui.SameLine(100)
+    imgui.TextColoredRGB("S: {0e8ce6}+35 (75)")
+    imgui.SameLine(200)
+    imgui.TextColoredRGB("HP: {ff0019}+0")
+    if imgui.Checkbox(u8("Готовые грибы"), cook_options.cooked_mushrooms) then
+      cfg.dishes["Готовые грибы"].is_cooking = cook_options.cooked_mushrooms.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nГрибы: {6AB1FF}" .. data.ingredients.inventory["Грибы"] .. " / 1")
+    imgui.NewLine()
+  
+    if imgui.Checkbox(u8("Жареная рыба"), cook_options.fried_fish) then
+      cfg.dishes["Жареная рыба"].is_cooking = cook_options.fried_fish.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nСырая рыба: {6AB1FF}" .. data.ingredients.inventory["Сырая рыба"] .. " / 20000")
+    imgui.NewLine()
+  
+    if imgui.Checkbox(u8("Жареная говядина"), cook_options.fried_beef) then
+      cfg.dishes["Жареная говядина"].is_cooking = cook_options.fried_beef.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nМясо дикой коровы: {6AB1FF}" .. data.ingredients.inventory["Мясо дикой коровы"] .. " / 1")
+    imgui.NewLine()
+  
+    if imgui.Checkbox(u8("Жареное мясо оленя"), cook_options.fried_venison) then
+      cfg.dishes["Жареное мясо оленя"].is_cooking = cook_options.fried_venison.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nМясо оленя: {6AB1FF}" .. data.ingredients.inventory["Мясо оленя"] .. " / 1")
+    imgui.NewLine()
+  
+    if imgui.Checkbox(u8("Тушеное черепашье мясо"), cook_options.stewed_turtle_meat) then
+      cfg.dishes["Тушеное черепашье мясо"].is_cooking = cook_options.stewed_turtle_meat.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nМясо черепахи: {6AB1FF}" .. data.ingredients.inventory["Мясо черепахи"] .. " / 1")
+    imgui.NewLine()
+  
+    if imgui.Checkbox(u8("Жареное акулье мясо"), cook_options.fried_shark_meat) then
+      cfg.dishes["Жареное акулье мясо"].is_cooking = cook_options.fried_shark_meat.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nМясо акулы: {6AB1FF}" .. data.ingredients.inventory["Мясо акулы"] .. " / 1")
+    imgui.NewLine()
+  
+    imgui.NewLine()
+  
+    imgui.TextColoredRGB("Скилл: {6AB1FF}500")
+    imgui.SameLine(100)
+    imgui.TextColoredRGB("S: {0e8ce6}+65 (150)")
+    imgui.SameLine(200)
+    imgui.TextColoredRGB("HP: {ff0019}+5")
+    if imgui.Checkbox(u8("Рагу из черепашьего мяса"), cook_options.stewed_turtle_meat_with_mushrooms) then
+      cfg.dishes["Рагу из черепашьего мяса"].is_cooking = cook_options.stewed_turtle_meat_with_mushrooms.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nТушеное черепашье мясо: {6AB1FF}" .. data.ingredients.inventory["Тушеное черепашье мясо"] .. " / 1\nОвощи: {6AB1FF}$50")
+    imgui.NewLine()
+  
+    imgui.NewLine()
+  
+    imgui.TextColoredRGB("Скилл: {6AB1FF}1000")
+    imgui.SameLine(100)
+    imgui.TextColoredRGB("S: {0e8ce6}+75 (150)")
+    imgui.SameLine(200)
+    imgui.TextColoredRGB("HP: {ff0019}+10")
+    if imgui.Checkbox(u8("Говядина с грибами"), cook_options.beef_with_mushrooms) then
+      cfg.dishes["Говядина с грибами"].is_cooking = cook_options.beef_with_mushrooms.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nЖареная говядина: {6AB1FF}" .. data.ingredients.inventory["Жареная говядина"] .. " / 1\nГотовые грибы: {6AB1FF}" .. data.ingredients.inventory["Готовые грибы"] .. " / 25")
+    imgui.NewLine()
+  
+    if imgui.Checkbox(u8("Оленина с грибами"), cook_options.venison_with_mushrooms) then
+      cfg.dishes["Оленина с грибами"].is_cooking = cook_options.venison_with_mushrooms.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nЖареное мясо оленя: {6AB1FF}" .. data.ingredients.inventory["Жареное мясо оленя"] .. " / 1\nГотовые грибы: {6AB1FF}" .. data.ingredients.inventory["Готовые грибы"] .. " / 25")
+    imgui.NewLine()
+  
+    imgui.NewLine()
+  
+    imgui.TextColoredRGB("Скилл: {6AB1FF}1500")
+    imgui.SameLine(100)
+    imgui.TextColoredRGB("S: {0e8ce6}+85 (150)")
+    imgui.SameLine(200)
+    imgui.TextColoredRGB("HP: {ff0019}+15")
+    if imgui.Checkbox(u8("Уха с мясом акулы"), cook_options.shark_meat_soup) then
+      cfg.dishes["Уха с мясом акулы"].is_cooking = cook_options.shark_meat_soup.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nЖареное акулье мясо: {6AB1FF}" .. data.ingredients.inventory["Жареное акулье мясо"] .. " / 1\nОвощи: {6AB1FF}$50")
+    imgui.NewLine()
+  
+    imgui.NewLine()
+  
+    imgui.TextColoredRGB("Скилл: {6AB1FF}2500")
+    imgui.SameLine(100)
+    imgui.TextColoredRGB("S: {0e8ce6}+25 (150)")
+    imgui.SameLine(200)
+    imgui.TextColoredRGB("HP: {ff0019}+25")
+    if imgui.Checkbox(u8("Морское блюдо"), cook_options.seafood_dish) then
+      cfg.dishes["Морское блюдо"].is_cooking = cook_options.seafood_dish.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nСардина: {6AB1FF}" .. data.ingredients.fish["Сардина"] .. " / 5")
+    imgui.NewLine()
+  
+    imgui.NewLine()
+  
+    imgui.TextColoredRGB("Скилл: {6AB1FF}3000")
+    imgui.SameLine(100)
+    imgui.TextColoredRGB("S: {0e8ce6}+30 (150)")
+    imgui.SameLine(200)
+    imgui.TextColoredRGB("HP: {ff0019}+30")
+    if imgui.Checkbox(u8("Уха из форели"), cook_options.trout_fish_soup) then
+      cfg.dishes["Уха из форели"].is_cooking = cook_options.trout_fish_soup.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nРадужная форель: {6AB1FF}" .. data.ingredients.fish["Радужная форель"] .. " / 3")
+    imgui.NewLine()
+  
+    imgui.NewLine()
+  
+    imgui.TextColoredRGB("Скилл: {6AB1FF}3500")
+    imgui.SameLine(100)
+    imgui.TextColoredRGB("S: {0e8ce6}+35 (150)")
+    imgui.SameLine(200)
+    imgui.TextColoredRGB("HP: {ff0019}+35")
+    if imgui.Checkbox(u8("Уха из щуки"), cook_options.pike_fish_soup) then
+      cfg.dishes["Уха из щуки"].is_cooking = cook_options.pike_fish_soup.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nЩука: {6AB1FF}" .. data.ingredients.fish["Щука"] .. " / 3")
+    imgui.NewLine()
+  
+    imgui.NewLine()
+  
+    imgui.TextColoredRGB("Скилл: {6AB1FF}4000")
+    imgui.SameLine(100)
+    imgui.TextColoredRGB("S: {0e8ce6}+40 (150)")
+    imgui.SameLine(200)
+    imgui.TextColoredRGB("HP: {ff0019}+40")
+    if imgui.Checkbox(u8("Рыбная похлебка"), cook_options.fish_chowder) then
+      cfg.dishes["Рыбная похлебка"].is_cooking = cook_options.fish_chowder.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nЛосось: {6AB1FF}" .. data.ingredients.fish["Лосось"] .. " / 3")
+    imgui.NewLine()
+  
+    imgui.NewLine()
+  
+    imgui.TextColoredRGB("Скилл: {6AB1FF}5000")
+    imgui.SameLine(100)
+    imgui.TextColoredRGB("S: {0e8ce6}+50 (150)")
+    imgui.SameLine(200)
+    imgui.TextColoredRGB("HP: {ff0019}+50")
+    if imgui.Checkbox(u8("Запечённый карп"), cook_options.baked_carp) then
+      cfg.dishes["Запечённый карп"].is_cooking = cook_options.baked_carp.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nКарп: {6AB1FF}" .. data.ingredients.fish["Карп"] .. " / 4")
+    imgui.NewLine()
+  
+    imgui.NewLine()
+  
+    imgui.TextColoredRGB("Скилл: {6AB1FF}6500")
+    imgui.SameLine(100)
+    imgui.TextColoredRGB("S: {0e8ce6}+65 (150)")
+    imgui.SameLine(200)
+    imgui.TextColoredRGB("HP: {ff0019}+65")
+    if imgui.Checkbox(u8("Жареный кальмар"), cook_options.fried_squid) then
+      cfg.dishes["Жареный кальмар"].is_cooking = cook_options.fried_squid.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nКальмар: {6AB1FF}" .. data.ingredients.fish["Кальмар"] .. " / 2")
+    imgui.NewLine()
+  
+    if imgui.Checkbox(u8("Рыбные тако"), cook_options.fish_tacos) then
+      cfg.dishes["Рыбные тако"].is_cooking = cook_options.fish_tacos.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nТунец: {6AB1FF}" .. data.ingredients.fish["Тунец"] .. " / 3")
+    imgui.NewLine()
+  
+    imgui.NewLine()
+  
+    imgui.TextColoredRGB("Скилл: {6AB1FF}8000")
+    imgui.SameLine(100)
+    imgui.TextColoredRGB("S: {0e8ce6}+80 (150)")
+    imgui.SameLine(200)
+    imgui.TextColoredRGB("HP: {ff0019}+80")
+    if imgui.Checkbox(u8("Морской пенный пудинг"), cook_options.sea_foam_pudding) then
+      cfg.dishes["Морской пенный пудинг"].is_cooking = cook_options.sea_foam_pudding.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nМелкая камбала: {6AB1FF}" .. data.ingredients.fish["Мелкая камбала"] .. " / 4")
+    imgui.NewLine()
+  
+    imgui.NewLine()
+  
+    imgui.TextColoredRGB("Скилл: {6AB1FF}10000")
+    imgui.SameLine(100)
+    imgui.TextColoredRGB("S: {0e8ce6}+100 (150)")
+    imgui.SameLine(200)
+    imgui.TextColoredRGB("HP: {ff0019}+100")
+    if imgui.Checkbox(u8("Жареная рыба-еж"), cook_options.fried_porcupinefish) then
+      cfg.dishes["Жареная рыба-еж"].is_cooking = cook_options.fried_porcupinefish.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Ингредиенты (в наличии / нужно)\nРыба-еж: {6AB1FF}" .. data.ingredients.fish["Рыба-еж"] .. " / 1")
+    imgui.NewLine()
+  elseif currentPage == 2 then
+    if imgui.Button(u8("Вкл/Выкл")) then
+      cfg.settings.eat_enabled = not cfg.settings.eat_enabled
+      if isEating then stopEating() end
+      saveCFG()
+    end
+    imgui.SameLine(130)
+    imgui.TextColoredRGB("Статус: " .. (cfg.settings.eat_enabled and "{00B200}Включено" or "{FF0F00}Выключено"))
+
+    imgui.NewLine()
+
+    if imgui.HotKey("##1", cfg.settings.act_eat_key, tLastKeys, 100) then
+      rkeys.changeHotKey(bindEat, cfg.settings.act_eat_key.v)
+      saveCFG()
+    end
+    imgui.SameLine()
+    imgui.Text(u8("- покушать"))
+    imgui.SameLine()
+    ShowHelpMarker("Горячая клавиша чтобы покушать\nБудет кушать блюда, начиная с начала списка")
+    imgui.NewLine()
+
+    if imgui.HotKey("##2", cfg.settings.act_heal_key, tLastKeys, 100) then
+      rkeys.changeHotKey(bindHeal, cfg.settings.act_heal_key.v)
+      saveCFG()
+    end
+    imgui.SameLine()
+    imgui.Text(u8("- пополнить здоровье"))
+    imgui.SameLine()
+    ShowHelpMarker("Горячая клавиша чтобы пополнить здоровье\nБудет кушать блюда, которые восстанавливают здоровье, в зависимости от текущего количества HP")
+    imgui.NewLine()
+
+    imgui.NewLine()
+  
+    if imgui.ButtonClickable(not isUpdatingData, u8("Выбрать имеющиеся блюда")) then
+      selectExistingDishes()
+      saveCFG()
+    end
+
+    imgui.NewLine()
+    imgui.Separator()
+
+    if imgui.Checkbox(u8("Готовые грибы"), eat_options.cooked_mushrooms) then
+      cfg.dishes["Готовые грибы"].is_eating = eat_options.cooked_mushrooms.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+10 (50)\nHP: {ff0019}+0")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Готовые грибы"])
+
+    if imgui.Checkbox(u8("Жареная рыба"), eat_options.fried_fish) then
+      cfg.dishes["Жареная рыба"].is_eating = eat_options.fried_fish.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+35 (75)\nHP: {ff0019}+0")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Жареная рыба"])
+
+    if imgui.Checkbox(u8("Жареная говядина"), eat_options.fried_beef) then
+      cfg.dishes["Жареная говядина"].is_eating = eat_options.fried_beef.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+35 (75)\nHP: {ff0019}+0")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Жареная говядина"])
+
+    if imgui.Checkbox(u8("Жареное мясо оленя"), eat_options.fried_venison) then
+      cfg.dishes["Жареное мясо оленя"].is_eating = eat_options.fried_venison.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+35 (75)\nHP: {ff0019}+0")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Жареное мясо оленя"])
+
+    if imgui.Checkbox(u8("Тушеное черепашье мясо"), eat_options.stewed_turtle_meat) then
+      cfg.dishes["Тушеное черепашье мясо"].is_eating = eat_options.stewed_turtle_meat.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+35 (75)\nHP: {ff0019}+0")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Тушеное черепашье мясо"])
+
+    if imgui.Checkbox(u8("Жареное акулье мясо"), eat_options.fried_shark_meat) then
+      cfg.dishes["Жареное акулье мясо"].is_eating = eat_options.fried_shark_meat.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+35 (75)\nHP: {ff0019}+0")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Жареное акулье мясо"])
+
+    if imgui.Checkbox(u8("Рагу из черепашьего мяса"), eat_options.stewed_turtle_meat_with_mushrooms) then
+      cfg.dishes["Рагу из черепашьего мяса"].is_eating = eat_options.stewed_turtle_meat_with_mushrooms.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+65 (150)\nHP: {ff0019}+5")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Рагу из черепашьего мяса"])
+
+    if imgui.Checkbox(u8("Говядина с грибами"), eat_options.beef_with_mushrooms) then
+      cfg.dishes["Говядина с грибами"].is_eating = eat_options.beef_with_mushrooms.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+75 (150)\nHP: {ff0019}+10")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Говядина с грибами"])
+
+    if imgui.Checkbox(u8("Оленина с грибами"), eat_options.venison_with_mushrooms) then
+      cfg.dishes["Оленина с грибами"].is_eating = eat_options.venison_with_mushrooms.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+75 (150)\nHP: {ff0019}+10")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Оленина с грибами"])
+
+    if imgui.Checkbox(u8("Уха с мясом акулы"), eat_options.shark_meat_soup) then
+      cfg.dishes["Уха с мясом акулы"].is_eating = eat_options.shark_meat_soup.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+85 (150)\nHP: {ff0019}+15")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Уха с мясом акулы"])
+
+    if imgui.Checkbox(u8("Морское блюдо"), eat_options.seafood_dish) then
+      cfg.dishes["Морское блюдо"].is_eating = eat_options.seafood_dish.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+25 (150)\nHP: {ff0019}+25")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Морское блюдо"])
+
+    if imgui.Checkbox(u8("Уха из форели"), eat_options.trout_fish_soup) then
+      cfg.dishes["Уха из форели"].is_eating = eat_options.trout_fish_soup.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+30 (150)\nHP: {ff0019}+30")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Уха из форели"])
+
+    if imgui.Checkbox(u8("Уха из щуки"), eat_options.pike_fish_soup) then
+      cfg.dishes["Уха из щуки"].is_eating = eat_options.pike_fish_soup.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+35 (150)\nHP: {ff0019}+35")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Уха из щуки"])
+
+    if imgui.Checkbox(u8("Рыбная похлебка"), eat_options.fish_chowder) then
+      cfg.dishes["Рыбная похлебка"].is_eating = eat_options.fish_chowder.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+40 (150)\nHP: {ff0019}+40")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Рыбная похлебка"])
+
+    if imgui.Checkbox(u8("Запечённый карп"), eat_options.baked_carp) then
+      cfg.dishes["Запечённый карп"].is_eating = eat_options.baked_carp.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+50 (150)\nHP: {ff0019}+50")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Запечённый карп"])
+
+    if imgui.Checkbox(u8("Жареный кальмар"), eat_options.fried_squid) then
+      cfg.dishes["Жареный кальмар"].is_eating = eat_options.fried_squid.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+65 (150)\nHP: {ff0019}+65")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Жареный кальмар"])
+
+    if imgui.Checkbox(u8("Рыбные тако"), eat_options.fish_tacos) then
+      cfg.dishes["Рыбные тако"].is_eating = eat_options.fish_tacos.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+65 (150)\nHP: {ff0019}+65")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Рыбные тако"])
+
+    if imgui.Checkbox(u8("Морской пенный пудинг"), eat_options.sea_foam_pudding) then
+      cfg.dishes["Морской пенный пудинг"].is_eating = eat_options.sea_foam_pudding.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+80 (150)\nHP: {ff0019}+80")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Морской пенный пудинг"])
+
+    if imgui.Checkbox(u8("Жареная рыба-еж"), eat_options.fried_porcupinefish) then
+      cfg.dishes["Жареная рыба-еж"].is_eating = eat_options.fried_porcupinefish.v
+      saveCFG()
+    end
+    imgui.SameLine()
+    ShowHelpMarker("Сытость: {0e8ce6}+100 (150)\nHP: {ff0019}+100")
+    imgui.SameLine(210)
+    imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Жареная рыба-еж"])
   end
 
-  imgui.NewLine()
-
-  imgui.TextColoredRGB("Скилл: {6AB1FF}0")
-  imgui.SameLine(100)
-  imgui.TextColoredRGB("S: {0e8ce6}+35 (75)")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("HP: {ff0019}+0")
-  if imgui.Checkbox(u8("Готовые грибы"), options.cooked_mushrooms) then
-    cfg.dishes["Готовые грибы"].enabled = options.cooked_mushrooms.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nГрибы: {6AB1FF}" .. data.ingredients.inventory["Грибы"] .. " / 1")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Готовые грибы"])
-
-  if imgui.Checkbox(u8("Жареная рыба"), options.fried_fish) then
-    cfg.dishes["Жареная рыба"].enabled = options.fried_fish.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nСырая рыба: {6AB1FF}" .. data.ingredients.inventory["Сырая рыба"] .. " / 20000")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Готовая рыба"])
-
-  if imgui.Checkbox(u8("Жареная говядина"), options.fried_beef) then
-    cfg.dishes["Жареная говядина"].enabled = options.fried_beef.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nМясо дикой коровы: {6AB1FF}" .. data.ingredients.inventory["Мясо дикой коровы"] .. " / 1")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Жареная говядина"])
-
-  if imgui.Checkbox(u8("Жареное мясо оленя"), options.fried_venison) then
-    cfg.dishes["Жареное мясо оленя"].enabled = options.fried_venison.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nМясо оленя: {6AB1FF}" .. data.ingredients.inventory["Мясо оленя"] .. " / 1")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Жареное мясо оленя"])
-
-  if imgui.Checkbox(u8("Тушеное черепашье мясо"), options.stewed_turtle_meat) then
-    cfg.dishes["Тушеное черепашье мясо"].enabled = options.stewed_turtle_meat.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nМясо черепахи: {6AB1FF}" .. data.ingredients.inventory["Мясо черепахи"] .. " / 1")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Тушеное черепашье мясо"])
-
-  if imgui.Checkbox(u8("Жареное акулье мясо"), options.fried_shark_meat) then
-    cfg.dishes["Жареное акулье мясо"].enabled = options.fried_shark_meat.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nМясо акулы: {6AB1FF}" .. data.ingredients.inventory["Мясо акулы"] .. " / 1")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Жареное акулье мясо"])
-
-  imgui.NewLine()
-
-  imgui.TextColoredRGB("Скилл: {6AB1FF}500")
-  imgui.SameLine(100)
-  imgui.TextColoredRGB("S: {0e8ce6}+65 (150)")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("HP: {ff0019}+5")
-  if imgui.Checkbox(u8("Рагу из черепашьего мяса"), options.stewed_turtle_meat_with_mushrooms) then
-    cfg.dishes["Рагу из черепашьего мяса"].enabled = options.stewed_turtle_meat_with_mushrooms.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nТушеное черепашье мясо: {6AB1FF}" .. data.ingredients.inventory["Тушеное черепашье мясо"] .. " / 1\nОвощи: {6AB1FF}$50")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Рагу из черепашьего мяса"])
-
-  imgui.NewLine()
-
-  imgui.TextColoredRGB("Скилл: {6AB1FF}1000")
-  imgui.SameLine(100)
-  imgui.TextColoredRGB("S: {0e8ce6}+75 (150)")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("HP: {ff0019}+10")
-  if imgui.Checkbox(u8("Говядина с грибами"), options.beef_with_mushrooms) then
-    cfg.dishes["Говядина с грибами"].enabled = options.beef_with_mushrooms.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nЖареная говядина: {6AB1FF}" .. data.ingredients.inventory["Жареная говядина"] .. " / 1\nГотовые грибы: {6AB1FF}" .. data.ingredients.inventory["Готовые грибы"] .. " / 25")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Говядина с грибами"])
-
-  if imgui.Checkbox(u8("Оленина с грибами"), options.venison_with_mushrooms) then
-    cfg.dishes["Оленина с грибами"].enabled = options.venison_with_mushrooms.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nЖареное мясо оленя: {6AB1FF}" .. data.ingredients.inventory["Жареное мясо оленя"] .. " / 1\nГотовые грибы: {6AB1FF}" .. data.ingredients.inventory["Готовые грибы"] .. " / 25")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Оленина с грибами"])
-
-  imgui.NewLine()
-
-  imgui.TextColoredRGB("Скилл: {6AB1FF}1500")
-  imgui.SameLine(100)
-  imgui.TextColoredRGB("S: {0e8ce6}+85 (150)")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("HP: {ff0019}+15")
-  if imgui.Checkbox(u8("Уха с мясом акулы"), options.shark_meat_soup) then
-    cfg.dishes["Уха с мясом акулы"].enabled = options.shark_meat_soup.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nЖареное акулье мясо: {6AB1FF}" .. data.ingredients.inventory["Жареное акулье мясо"] .. " / 1\nОвощи: {6AB1FF}$50")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Уха с мясом акулы"])
-
-  imgui.NewLine()
-
-  imgui.TextColoredRGB("Скилл: {6AB1FF}2500")
-  imgui.SameLine(100)
-  imgui.TextColoredRGB("S: {0e8ce6}+25 (150)")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("HP: {ff0019}+25")
-  if imgui.Checkbox(u8("Морское блюдо"), options.seafood_dish) then
-    cfg.dishes["Морское блюдо"].enabled = options.seafood_dish.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nСардина: {6AB1FF}" .. data.ingredients.fish["Сардина"] .. " / 5")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Морское блюдо"])
-
-  imgui.NewLine()
-
-  imgui.TextColoredRGB("Скилл: {6AB1FF}3000")
-  imgui.SameLine(100)
-  imgui.TextColoredRGB("S: {0e8ce6}+30 (150)")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("HP: {ff0019}+30")
-  if imgui.Checkbox(u8("Уха из форели"), options.trout_fish_soup) then
-    cfg.dishes["Уха из форели"].enabled = options.trout_fish_soup.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nРадужная форель: {6AB1FF}" .. data.ingredients.fish["Радужная форель"] .. " / 3")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Уха из форели"])
-
-  imgui.NewLine()
-
-  imgui.TextColoredRGB("Скилл: {6AB1FF}3500")
-  imgui.SameLine(100)
-  imgui.TextColoredRGB("S: {0e8ce6}+35 (150)")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("HP: {ff0019}+35")
-  if imgui.Checkbox(u8("Уха из щуки"), options.pike_fish_soup) then
-    cfg.dishes["Уха из щуки"].enabled = options.pike_fish_soup.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nЩука: {6AB1FF}" .. data.ingredients.fish["Щука"] .. " / 3")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Уха из щуки"])
-
-  imgui.NewLine()
-
-  imgui.TextColoredRGB("Скилл: {6AB1FF}4000")
-  imgui.SameLine(100)
-  imgui.TextColoredRGB("S: {0e8ce6}+40 (150)")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("HP: {ff0019}+40")
-  if imgui.Checkbox(u8("Рыбная похлебка"), options.fish_chowder) then
-    cfg.dishes["Рыбная похлебка"].enabled = options.fish_chowder.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nЛосось: {6AB1FF}" .. data.ingredients.fish["Лосось"] .. " / 3")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Рыбная похлебка"])
-
-  imgui.NewLine()
-
-  imgui.TextColoredRGB("Скилл: {6AB1FF}5000")
-  imgui.SameLine(100)
-  imgui.TextColoredRGB("S: {0e8ce6}+50 (150)")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("HP: {ff0019}+50")
-  if imgui.Checkbox(u8("Запечённый карп"), options.baked_carp) then
-    cfg.dishes["Запечённый карп"].enabled = options.baked_carp.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nКарп: {6AB1FF}" .. data.ingredients.fish["Карп"] .. " / 4")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Запечённый карп"])
-
-  imgui.NewLine()
-
-  imgui.TextColoredRGB("Скилл: {6AB1FF}6500")
-  imgui.SameLine(100)
-  imgui.TextColoredRGB("S: {0e8ce6}+65 (150)")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("HP: {ff0019}+65")
-  if imgui.Checkbox(u8("Жареный кальмар"), options.fried_squid) then
-    cfg.dishes["Жареный кальмар"].enabled = options.fried_squid.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nКальмар: {6AB1FF}" .. data.ingredients.fish["Кальмар"] .. " / 2")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Жареный кальмар"])
-
-  if imgui.Checkbox(u8("Рыбные тако"), options.fish_tacos) then
-    cfg.dishes["Рыбные тако"].enabled = options.fish_tacos.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nТунец: {6AB1FF}" .. data.ingredients.fish["Тунец"] .. " / 3")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Рыбные тако"])
-
-  imgui.NewLine()
-
-  imgui.TextColoredRGB("Скилл: {6AB1FF}8000")
-  imgui.SameLine(100)
-  imgui.TextColoredRGB("S: {0e8ce6}+80 (150)")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("HP: {ff0019}+80")
-  if imgui.Checkbox(u8("Морской пенный пудинг"), options.sea_foam_pudding) then
-    cfg.dishes["Морской пенный пудинг"].enabled = options.sea_foam_pudding.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nМелкая камбала: {6AB1FF}" .. data.ingredients.fish["Мелкая камбала"] .. " / 4")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Морской пенный пудинг"])
-
-  imgui.NewLine()
-
-  imgui.TextColoredRGB("Скилл: {6AB1FF}10000")
-  imgui.SameLine(100)
-  imgui.TextColoredRGB("S: {0e8ce6}+100 (150)")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("HP: {ff0019}+100")
-  if imgui.Checkbox(u8("Жареная рыба-еж"), options.fried_porcupinefish) then
-    cfg.dishes["Жареная рыба-еж"].enabled = options.fried_porcupinefish.v
-    saveCFG()
-  end
-  imgui.SameLine()
-  ShowHelpMarker("Ингредиенты (в наличии / нужно)\nРыба-еж: {6AB1FF}" .. data.ingredients.fish["Рыба-еж"] .. " / 1")
-  imgui.SameLine(200)
-  imgui.TextColoredRGB("{6AB1FF}" .. data.ingredients.inventory["Жареная рыба-еж"])
   imgui.NewLine()
 
   if imgui.Button(u8("Телеграм канал")) then os.execute('explorer "https://t.me/melvin_costra"') end
@@ -769,12 +1219,6 @@ function imgui.TextColoredRGB(text)
 end
 
 ------------------------------------ Utils  ------------------------------------
-function toggleScriptActivation()
-  cfg.settings.enabled = not cfg.settings.enabled
-  if isCooking then stopCooking() end
-  saveCFG()
-end
-
 function sendCommand(cmd)
   if commandStates[cmd] then
     return
@@ -814,13 +1258,19 @@ end
 
 ------------------------------------ Events  ------------------------------------
 function ev.onServerMessage(c, text)
-  if isUpdatingData and text:find(" Ваш навык приготовление еды: {FFFFFF}%d+/10000") then
-    data.skill = tonumber(text:match(" Ваш навык приготовление еды: {FFFFFF}(%d+)/10000"))
-    commandStates["/kitchen skill"] = nil
-    sendCommand("/inventory")
-    return false
+  if isUpdatingData then
+    if text == " У вас нет еды" then return false end
+
+    local skill = text:match(" Ваш навык приготовление еды: {FFFFFF}(%d+)/10000")
+    if skill then
+      data.skill = tonumber(skill)
+      commandStates["/kitchen skill"] = nil
+      sendCommand("/eat")
+      return false
+    end
   end
-	if cfg.settings.enabled and isCooking then
+
+	if cfg.settings.cook_enabled and isCooking then
     if text == " (( Введите: /kitchen cooking ещё раз или нажмите l.alt ))" then
       sendCommand("/kitchen cooking")
     elseif text:find("^ Вы приготовили {FFFFFF}'.+'{6AB1FF}: %d+") then
@@ -849,6 +1299,37 @@ function ev.onServerMessage(c, text)
       return false
     end
   end
+
+  if isEating then
+    local satiety = text:match(" Вы съели {FFFFFF}'.+'{6AB1FF}%. Сытость пополнена до (%d+)%.")
+    if text == " Вы не голодны/Превышен лимит допустимой сытости" then
+      stopEating()
+    elseif satiety then
+      data.my_satiety = tonumber(satiety)
+      if cfg.dishes[currentDishName] and cfg.dishes[currentDishName].max_satiety == data.my_satiety then
+        stopEating()
+      else
+        antiflood = os.clock() * 1000
+        sendCommand("/eat")
+      end
+    end
+  end
+
+  local satiety = text:match(" Ваша «Сытость»: (%d+) / %d+")
+  if satiety then
+    commandStates["/satiety"] = nil
+    satiety = tonumber(satiety)
+    data.my_satiety = satiety
+    if isEating then
+      if satiety <= 150 then
+        sendCommand("/eat")
+      else
+        sendChatMessage("Ты не голодный")
+        stopEating()
+      end
+    end
+    return false
+  end
 end
 
 function ev.onSendChat(text)
@@ -861,15 +1342,15 @@ end
 
 function ev.onShowDialog(id, style, title, btn1, btn2, text)
   if isUpdatingData or window.v then
-    if style == 4 and title == "Карманы" then
-      commandStates["/inventory"] = nil
+    if (style == 5 or style == 2) and title == "{FFFFFF}Еда" then
+      commandStates["/eat"] = nil
       local remaining = {}
       for name in pairs(data.ingredients.inventory) do
         remaining[name] = true
       end
       for line in text:gmatch("[^\n]+") do
         local raw_text = escape_string(line)
-        local name, amount = raw_text:match("%[%d+%] (.+)\\t(%d+) / %d+")
+        local name, amount = raw_text:match("{FFFFFF}(.+)\\t{6AB1FF}(%d+)")
         if data.ingredients.inventory[name] and amount then
           data.ingredients.inventory[name] = tonumber(amount)
           remaining[name] = nil
@@ -877,6 +1358,19 @@ function ev.onShowDialog(id, style, title, btn1, btn2, text)
       end
       for name in pairs(remaining) do
         data.ingredients.inventory[name] = 0
+      end
+      sendCommand("/inventory")
+      return false
+    end
+
+    if style == 4 and title == "Карманы" then
+      commandStates["/inventory"] = nil
+      for line in text:gmatch("[^\n]+") do
+        local raw_text = escape_string(line)
+        local name, amount = raw_text:match("%[%d+%] (.+)\\t(%d+) / %d+")
+        if data.ingredients.inventory[name] and amount then
+          data.ingredients.inventory[name] = tonumber(amount)
+        end
       end
       sendCommand("/fish inv")
       return false
@@ -904,7 +1398,7 @@ function ev.onShowDialog(id, style, title, btn1, btn2, text)
     end
   end
 
-  if cfg.settings.enabled and isCooking then
+  if cfg.settings.cook_enabled and isCooking then
     if style == 0 and title == "Кухня" then
       commandStates["/kitchen cooking"] = nil
       sampSendDialogResponse(id, 1, 0, "")
@@ -922,7 +1416,7 @@ function ev.onShowDialog(id, style, title, btn1, btn2, text)
         local raw_text = escape_string(line)
         local name, satiety, hp, skill = raw_text:match("{FFFFFF}(.+)\\t{6AB1FF}(.+)\\t{FFFFFF}(.+)\\t{6AB1FF}(.+)")
         if name and satiety and hp and skill then
-          if cfg.dishes[name].enabled then
+          if cfg.dishes[name].is_cooking then
             table.insert(dishesQueue, { key = cfg.dishes[name].key, name = name, index = i })
           end
         end
@@ -936,6 +1430,73 @@ function ev.onShowDialog(id, style, title, btn1, btn2, text)
       return false
     end
   end
+
+  if cfg.settings.eat_enabled then
+    if isEating or isHealing then
+      if style == 2 and title == "{FFFFFF}Еда" then
+        stopEating()
+        cfg.settings.eat_enabled = false
+        saveCFG()
+        return false
+      end
+
+      if style == 0 and cfg.dishes[title] ~= nil then
+        if isHealing then
+          stopEating()
+        end
+        sampSendDialogResponse(id, 1, 0, "")
+        return false
+      end
+
+      if style == 5 and title == "{FFFFFF}Еда" then
+        commandStates["/eat"] = nil
+        local lines = text:gsub("^[^\n]*\n", "")
+        local healingDishIndex = -1
+        local i = 0
+        for line in lines:gmatch("[^\n]+") do
+          local raw_text = escape_string(line)
+          local name, amount = raw_text:match("{FFFFFF}(.+)\\t{6AB1FF}(%d+)")
+          if name and amount then
+            if cfg.dishes[name] and cfg.dishes[name].is_eating then
+              if isHealing then
+                if cfg.dishes[name].hp > 0 then
+                  healingDishIndex = i
+                  if cfg.dishes[name].hp >= (100 - data.my_hp) then
+                    sampSendDialogResponse(id, 1, i, "")
+                    return false
+                  end
+                end
+              elseif isEating then
+                if cfg.dishes[name].max_satiety > data.my_satiety then
+                  currentDishName = name
+                  sampSendDialogResponse(id, 1, i, "")
+                else
+                  sendChatMessage("Твоя сытость превышает максимальную для {6AB1FF}" .. name)
+                  stopEating()
+                end
+                return false
+              end
+            end
+          end
+          i = i + 1
+        end
+        if isHealing then
+          if healingDishIndex ~= -1 then
+            sampSendDialogResponse(id, 1, healingDishIndex, "")
+          else
+            sendChatMessage("Блюд для лечения не найдено")
+            stopEating()
+          end
+        elseif isEating then
+          sendChatMessage("Блюд для поедания не найдено")
+          cfg.settings.eat_enabled = false
+          stopEating()
+          saveCFG()
+        end
+        return false
+      end
+    end
+  end
 end
 
 function onWindowMessage(m, p)
@@ -947,4 +1508,5 @@ end
 
 function onScriptTerminate()
   stopCooking()
+  stopEating()
 end
